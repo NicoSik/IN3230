@@ -52,7 +52,7 @@ int setup_unix_socket(const char *path)
 }
 int create_socket(const char *iface_name)
 {
-    int raw_sock = socket(AF_PACKET, SOCK_RAW, htons(ETHERNET_TYPE_PROTO));
+    int raw_sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_PROTOCOL));
     if (raw_sock == -1)
     {
         perror("raw socket");
@@ -108,6 +108,7 @@ void daemon()
 
         // Incoming from server
         if (fds[0].revents & POLLIN)
+
         {
             ssize_t n = recv(app_fd, buffer, sizeof(buffer), 0);
             if (n <= 0)
@@ -189,9 +190,22 @@ int main(int argc, char *argv[])
     // TODO: implement MIP-ARP and cache
 
     // TODO: main loop: select/poll, handle inbound/outbound traffic
-
+    daemon();
     return 0;
 }
+void arp_cache_insert(mip_arp_cache_t *cache, uint8_t mip, uint8_t *mac, int if_index)
+{
+    cache->entries[mip].mip_addr = mip;
+    memcpy(cache->entries[mip].mac_addr, mac, 6);
+    cache->entries[mip].valid = 1;
+}
+mip_arp_entry_t *arp_cache_lookup(mip_arp_cache_t *cache, uint8_t mip)
+{
+    if (cache->entries[mip].valid)
+        return &cache->entries[mip];
+    return NULL;
+}
+
 // If we want to listen to more than 1 client at a time
 //  void sock_listen(int server_fd)
 //  {
