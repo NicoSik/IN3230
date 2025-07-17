@@ -24,17 +24,17 @@ mip_arp_entry_t *arp_cache_lookup(mip_arp_cache_t *cache, uint8_t mip)
         return &cache->entries[mip];
     return NULL;
 }
-void print_usage(const char *progname)
-{
-    fprintf(stderr, "Usage: %s [-d] <socket_upper> <mip_addr>\n", progname);
-    exit(EXIT_FAILURE);
-}
+// void print_usage(const char *progname)
+// {
+//     fprintf(stderr, "Usage: %s [-d] <socket_upper> <mip_addr>\n", progname);
+//     exit(EXIT_FAILURE);
+// }
 
-void debug_log(const char *msg)
-{
-    // Placeholder debug printer
-    fprintf(stderr, "[DEBUG] %s\n", msg);
-}
+// void debug_log(const char *msg)
+// {
+//     // Placeholder debug printer
+//     fprintf(stderr, "[DEBUG] %s\n", msg);
+// }
 
 int setup_unix_socket(const char *path)
 {
@@ -147,42 +147,84 @@ void daemon(int app_fd, int mip_addr, raw_socket_info_t raw_info)
 
             // buffer[0] = destination MIP address
             uint8_t dst_mip = buffer[0];
-            uint8_t *payload = &buffer[1];
-            size_t payload_len = n - 1;
-            uint8_t *mac = raw_info.mac;
+
             // interface indx for the network interface
-            int if_index = raw_info.if_index;
 
             mip_arp_entry_t *entry = arp_cache_lookup(arp_cache, dst_mip);
             // Dont have the mac addr yet
             if (entry == NULL)
             {
-                // Send MIP-ARP request here and wait for reply
-                send_arp_request(raw_info, mip_addr, if_index, mac, dst_mip);
-                recv_arp_response(raw_info.sock, dst_mip);
-            }
-
-            // Now you can use entry->mac_addr and entry->if_index to send the packet
-
-            // Incoming from network
-            if (fds[1].revents & POLLIN)
-            {
-                ssize_t n = recv(raw_info, buffer, sizeof(buffer), 0);
-                if (n <= 0)
+                if (send_arp_request(raw_info, mip_addr, dst_mip) < 0 ||
+                    recv_arp_response(raw_info, dst_mip) < 0)
                 {
-                    perror("recv from raw socket");
-                    break;
+                    fprintf(stderr, "[ERROR] Failed to resolve MIP address %d\n", dst_mip);
+                    continue; // Skip sending
                 }
 
-                // TODO:
-                // - Parse Ethernet + MIP header
-                // - Check if destination MIP == my_mip
-                // - If yes, send SDU to app_fd
+                // Refresh entry after successful ARP
+                entry = arp_cache_lookup(&arp_cache, dst_mip);
+                if (!entry)
+                {
+                    fprintf(stderr, "[ERROR] ARP resolved but entry missing from cache\n");
+                    continue;
+                }
             }
+            send_mip_data(buffer, mip_addr, raw_info, n, entry);
+        }
+
+        // Incoming from network/depack the message
+        if (fds[1].revents & POLLIN)
+        {
+            ssize_t n = recv(raw_info.sock, buffer, sizeof(buffer), 0);
+            if (n <= 0)
+            {
+                perror("recv from raw socket");
+                break;
+            }
+
+            // TODO:
+            // - Parse Ethernet + MIP header
+            // - Check if destination MIP == my_mip
+            // - If yes, send SDU to app_fd
         }
     }
 }
-void recv_arp_response(int raw_sock, uint8_t expected_mip)
+int send_mip_data(uint8_t *buffer, int mip_addr, raw_socket_info_t raw_info, size_t n, mip_arp_entry_t *entry)
+{
+    uint8_t *payload = &buffer[1];
+    size_t payload_len = n - 1;
+    uint8_t dst_mip = buffer[0];
+
+    struct mip_frame
+    {
+        struct ether_frame eth;
+        struct mip_header_raw mip;
+        uint8_t payload[BUF_SIZE];
+    } __attribute__((packed));
+    struct ether_frame *eth = (struct ether_frame *)buffer;
+    struct mip_header_raw *mip = (struct mip_header_raw *)(buffer + sizeof(struct ether_frame));
+
+    if (mip->dst_addr == mip_addr)
+    {
+        size_t sdu_len = MIP_GET_SDU_LEN(mip);
+        send(app_fd, buffer + sizeof(struct ether_frame) + sizeof(struct mip_header_raw), sdu_len, 0);
+    }
+
+    struct mip_frame frame = {0};
+    memcpy(frame.eth.dst_addr, entry->mac_addr, 6);
+    memcpy(frame.eth.src_addr, raw_info.mac, 6);
+    frame.eth.eth_proto = htons(ETH_PROTOCOL);
+    // Dst addr
+    frame.mip.dst_addr = dst_mip;
+    frame.mip.src_addr = mip_addr;
+    MIP_SET_TTL(&frame.mip, 15);
+    MIP_SET_SDU_LEN(&frame.mip, payload_len);
+    MIP_SET_SDU_TYPE(&frame.mip, MIP_SDU_TYPE_PING);
+
+    // Payload
+    memcpy(frame.payload, payload, payload_len);
+}
+int recv_arp_response(raw_socket_info_t raw_info, uint8_t expected_mip)
 {
     uint8_t buf[BUF_SIZE];
     struct sockaddr_ll recv_addr;
@@ -190,12 +232,12 @@ void recv_arp_response(int raw_sock, uint8_t expected_mip)
 
     while (1)
     {
-        ssize_t n = recvfrom(raw_sock, buf, BUF_SIZE, 0,
+        ssize_t n = recvfrom(raw_info.sock, buf, BUF_SIZE, 0,
                              (struct sockaddr *)&recv_addr, &addrlen);
         if (n < 0)
         {
             perror("recvfrom (ARP response)");
-            return;
+            return -1;
         }
 
         struct ether_frame *eth = (struct ether_frame *)buf;
@@ -207,7 +249,7 @@ void recv_arp_response(int raw_sock, uint8_t expected_mip)
             {
                 printf("[DEBUG] Received ARP response from MIP %u\n", mip->src_addr);
                 arp_cache_insert(&arp_cache, mip->src_addr, eth->src_addr, recv_addr.sll_ifindex);
-                return;
+                return 0;
             }
             // if someone else responds their mac addr
             else
@@ -217,8 +259,10 @@ void recv_arp_response(int raw_sock, uint8_t expected_mip)
             }
         }
     }
+    // cant happen
+    return -1;
 }
-void send_arp_request(int raw_sock, uint8_t my_mip, int if_index, uint8_t *src_mac, uint8_t target_mip)
+void send_arp_request(raw_socket_info_t raw_info, uint8_t my_mip, uint8_t target_mip)
 {
     struct ether_mip_arp_frame
     {
@@ -242,14 +286,14 @@ void send_arp_request(int raw_sock, uint8_t my_mip, int if_index, uint8_t *src_m
 
     uint8_t broadcast_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
     memcpy(frame.eth.dst_addr, broadcast_mac, 6);
-    memcpy(frame.eth.src_addr, src_mac, 6);
+    memcpy(frame.eth.src_addr, raw_info.mac, 6);
     frame.eth.eth_proto = htons(ETH_PROTOCOL);
 
     // STEP 1 (continued): Construct MIP header
     frame.mip.dst_addr = 0xFF; // broadcast
     frame.mip.src_addr = my_mip;
     MIP_SET_TTL(&frame.mip, 1);     // TTL = 1 for ARP, for now?
-    MIP_SET_SDU_LEN(&frame.mip, 1); // Payload = 1 byte
+    MIP_SET_SDU_LEN(&frame.mip, 4); // Payload = 4 byte
     MIP_SET_SDU_TYPE(&frame.mip, MIP_SDU_TYPE_ARP);
 
     // STEP 2: Point msg vec to frame buffer
@@ -258,7 +302,7 @@ void send_arp_request(int raw_sock, uint8_t my_mip, int if_index, uint8_t *src_m
 
     // STEP 3: Construct msg header
     dest_sockaddr.sll_family = AF_PACKET;
-    dest_sockaddr.sll_ifindex = if_index;
+    dest_sockaddr.sll_ifindex = raw_info.if_index;
     dest_sockaddr.sll_halen = 6;
     memcpy(dest_sockaddr.sll_addr, broadcast_mac, 6);
 
@@ -269,16 +313,17 @@ void send_arp_request(int raw_sock, uint8_t my_mip, int if_index, uint8_t *src_m
     msg.msg_iovlen = 1;
 
     // STEP 4: Send message
-    int rc = sendmsg(raw_sock, &msg, 0);
+    int rc = sendmsg(raw_info.sock, &msg, 0);
     if (rc == -1)
     {
         perror("sendmsg (ARP request)");
+        return -1;
     }
     else
     {
         printf("[DEBUG] Sent ARP request for MIP %u\n", target_mip);
     }
-    return rc;
+    return 0;
 }
 int main(int argc, char *argv[])
 {
