@@ -1,6 +1,6 @@
 #include <sys/un.h>
 #include <netpacket/packet.h>
-#define ETH_PROTOCOL 0x0806
+#define ETH_PROTOCOL 0x88B5
 #define MAX_CONNECTIONS 2
 // Extracting the mip fields
 // -------------------------------------------------------
@@ -36,29 +36,36 @@
 #define MIP_SET_SDU_TYPE(hdr, type) \
     ((hdr)->len_low_type = ((hdr)->len_low_type & 0xF8) | ((type) & 0x07))
 // ---------------------------------------------
-typedef struct
-{
-    uint8_t mip_addr;    // MIP address (0–254)
-    uint8_t mac_addr[6]; // Resolved Ethernet MAC address
-    int valid;           // 1 = valid entry, 0 = unused
-    typedef struct
-} typedef struct
-{
-    mip_arp_entry_t entries[MAX_MIP_ADDRS];
-} mip_arp_cache_t;
-{
-    int socket_fd;
-    struct sockaddr_un addr;
-}
-unix_socket_t;
+#define MIP_SDU_TYPE_ARP 0x01  // Same as 1
+#define MIP_SDU_TYPE_PING 0x02 // Same as 2
 
 typedef struct
 {
-    int socket_fd;
-    struct sockaddr_ll if_addr;
-    char if_name[IFNAMSIZ];
+    uint8_t mip_addr;
+    uint8_t mac_addr[6];
+    int valid;
+} mip_arp_entry_t;
+
+#define MAX_MIP_ADDRS 255
+
+typedef struct
+{
+    mip_arp_entry_t entries[MAX_MIP_ADDRS];
+} mip_arp_cache_t;
+
+typedef struct
+{
+    int sock;
     int if_index;
-} raw_socket_t;
+    uint8_t mac[6];
+} raw_socket_info_t;
+
+struct ether_frame
+{
+    uint8_t dst_addr[6];
+    uint8_t src_addr[6];
+    uint16_t eth_proto;
+} __attribute__((packed));
 //   +--------------+-------------+---------+-----------+-----------+
 //      | Dest. Addr.  | Src. Addr.  | TTL     | SDU Len.  | SDU type  |
 //      +--------------+-------------+---------+-----------+-----------+
@@ -75,15 +82,3 @@ typedef struct
 //                         this MIP datagram.
 
 //    SDU type             The type of the SDU (i.e. upper layer protocol type).
-struct mip_header_raw
-{
-    uint8_t dst_addr;     // Byte 0: bits 31–24
-    uint8_t src_addr;     // Byte 1: bits 23–16
-    uint8_t ttl_len_high; // Byte 2:
-                          //   bits 7–4: TTL (bits 15–12)
-                          //   bits 3–0: SDU len bits [8:5] (bits 11–8)
-
-    uint8_t len_low_type; // Byte 3:
-                          //   bits 7–3: SDU len bits [4:0] (bits 7–3)
-                          //   bits 2–0: SDU type (bits 2–0)
-};

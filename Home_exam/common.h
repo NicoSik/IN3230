@@ -2,24 +2,18 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#define ETH_P_MIP 0x88B5
-#define MAX_PAYLOAD_SIZE 1492
-#define MIP_HDR_SIZE 4
-
 // MIP Header Structure
-typedef struct
+struct mip_header_raw
 {
-    uint8_t tra; // Transport protocol
-    uint8_t ttl; // Time to live
-    uint8_t src; // Source MIP address
-    uint8_t dst; // Destination MIP address
-} mip_header_t;
+    uint8_t dst_addr;     // Byte 0: bits 31–24
+    uint8_t src_addr;     // Byte 1: bits 23–16
+    uint8_t ttl_len_high; // Byte 2:
+                          //   bits 7–4: TTL (bits 15–12)
+                          //   bits 3–0: SDU len bits [8:5] (bits 11–8)
 
-// MIP PDU: Header + Payload
-typedef struct
-{
-    mip_header_t header;
-    uint8_t payload[MAX_PAYLOAD_SIZE];
-} mip_packet_t;
+    uint8_t len_low_type; // Byte 3:
+                          //   bits 7–3: SDU len bits [4:0] (bits 7–3)
+                          //   bits 2–0: SDU type (bits 2–0)
+};
 
 #endif
