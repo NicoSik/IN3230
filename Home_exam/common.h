@@ -15,5 +15,6 @@ struct mip_header_raw
                           //   bits 7–3: SDU len bits [4:0] (bits 7–3)
                           //   bits 2–0: SDU type (bits 2–0)
 };
-
+#define MIP_SDU_TYPE_ARP 0x01
+#define MIP_SDU_TYPE_PING 0x02
 #endif

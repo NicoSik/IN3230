@@ -31,8 +31,6 @@
 #define MIP_SET_SDU_TYPE(hdr, type) \
     ((hdr)->len_low_type = ((hdr)->len_low_type & 0xF8) | ((type) & 0x07))
 
-#define MIP_SDU_TYPE_ARP 0x01
-#define MIP_SDU_TYPE_PING 0x02
 #define ARP_REQUEST 0x00
 #define ARP_RESPONSE 0x01
 
