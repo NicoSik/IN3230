@@ -3,14 +3,18 @@
 #include <unistd.h>
 #include <string.h>
 #include "common.h"
+#include <stdint.h>
 
-void print_usage(const char *progname) {
+void print_usage(const char *progname)
+{
     fprintf(stderr, "Usage: %s <socket_lower>\n", progname);
     exit(EXIT_FAILURE);
 }
 
-int main(int argc, char *argv[]) {
-    if (argc != 2) print_usage(argv[0]);
+int main(int argc, char *argv[])
+{
+    if (argc != 2)
+        print_usage(argv[0]);
     char *socket_path = argv[1];
 
     // TODO: Connect to MIP daemon via UNIX socket
