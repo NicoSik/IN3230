@@ -165,8 +165,7 @@ void run_daemon(int app_fd, int mip_addr, raw_socket_info_t raw_info)
             // Dont have the mac addr yet
             if (entry == NULL)
             {
-                if (send_arp_request(raw_info, mip_addr, dst_mip) < 0 ||
-                    recv_arp_response(raw_info, dst_mip) < 0)
+                if (send_arp_request(raw_info, mip_addr, dst_mip) < 0)
                 {
                     fprintf(stderr, "[ERROR] Failed to resolve MIP address %d\n", dst_mip);
                     continue; // Skip sending
@@ -193,8 +192,6 @@ void run_daemon(int app_fd, int mip_addr, raw_socket_info_t raw_info)
                 break;
             }
 
-            // TODO:
-            // - Parse Ethernet + MIP header
             if (n < sizeof(struct ether_frame) + sizeof(struct mip_header_raw))
             {
                 fprintf(stderr, "Frame too short\n");
@@ -203,58 +200,74 @@ void run_daemon(int app_fd, int mip_addr, raw_socket_info_t raw_info)
             struct ether_frame *eth = (struct ether_frame *)buffer;
             struct mip_header_raw *mip = (struct mip_header_raw *)(buffer + sizeof(struct ether_frame));
 
-            if (MIP_GET_SDU_TYPE(mip) != MIP_SDU_TYPE_PING)
-            {
-                continue;
-            }
             uint8_t *payload = buffer + sizeof(struct ether_frame) + sizeof(struct mip_header_raw);
+            uint8_t sdu_type = MIP_GET_SDU_TYPE(mip);
 
-            if (MIP_GET_SDU_TYPE(mip) == MIP_SDU_TYPE_ARP && payload[0] == ARP_REQUEST)
+            if (sdu_type == MIP_SDU_TYPE_ARP)
             {
-                uint8_t target_mip = payload[1];
-                if (target_mip == mip_addr)
+                if (payload[0] == ARP_REQUEST)
                 {
-                    // Prepare ARP response
-                    struct
+
+                    uint8_t target_mip = payload[1];
+                    if (target_mip == mip_addr)
                     {
-                        struct ether_frame eth;
-                        struct mip_header_raw mip;
-                        uint8_t payload[4];
-                    } __attribute__((packed)) resp;
+                        // Prepare ARP response
+                        struct
+                        {
+                            struct ether_frame eth;
+                            struct mip_header_raw mip;
+                            uint8_t payload[4];
+                        } __attribute__((packed)) resp;
 
-                    memset(&resp, 0, sizeof(resp));
-                    memcpy(resp.eth.dst_addr, eth->src_addr, 6);
-                    memcpy(resp.eth.src_addr, raw_info.mac, 6);
-                    resp.eth.eth_proto = htons(ETH_PROTOCOL);
+                        memset(&resp, 0, sizeof(resp));
+                        memcpy(resp.eth.dst_addr, eth->src_addr, 6);
+                        memcpy(resp.eth.src_addr, raw_info.mac, 6);
+                        resp.eth.eth_proto = htons(ETH_PROTOCOL);
 
-                    resp.mip.dst_addr = mip->src_addr;
-                    resp.mip.src_addr = mip_addr;
-                    MIP_SET_TTL(&resp.mip, 1);
-                    MIP_SET_SDU_LEN(&resp.mip, 4);
-                    MIP_SET_SDU_TYPE(&resp.mip, MIP_SDU_TYPE_ARP);
+                        resp.mip.dst_addr = mip->src_addr;
+                        resp.mip.src_addr = mip_addr;
+                        MIP_SET_TTL(&resp.mip, 1);
+                        MIP_SET_SDU_LEN(&resp.mip, 4);
+                        MIP_SET_SDU_TYPE(&resp.mip, MIP_SDU_TYPE_ARP);
 
-                    resp.payload[0] = ARP_RESPONSE;
-                    resp.payload[1] = mip_addr;
-                    resp.payload[2] = 0x00;
-                    resp.payload[3] = 0x00;
+                        resp.payload[0] = ARP_RESPONSE;
+                        resp.payload[1] = mip_addr;
+                        resp.payload[2] = 0x00;
+                        resp.payload[3] = 0x00;
 
-                    struct sockaddr_ll sll = {0};
-                    sll.sll_family = AF_PACKET;
-                    sll.sll_ifindex = raw_info.if_index;
-                    sll.sll_halen = 6;
-                    memcpy(sll.sll_addr, eth->src_addr, 6);
+                        struct sockaddr_ll sll = {0};
+                        sll.sll_family = AF_PACKET;
+                        sll.sll_ifindex = raw_info.if_index;
+                        sll.sll_halen = 6;
+                        memcpy(sll.sll_addr, eth->src_addr, 6);
 
-                    struct msghdr msg = {0};
-                    struct iovec iov = {0};
-                    iov.iov_base = &resp;
-                    iov.iov_len = sizeof(resp);
-                    msg.msg_name = &sll;
-                    msg.msg_namelen = sizeof(sll);
-                    msg.msg_iov = &iov;
-                    msg.msg_iovlen = 1;
+                        struct msghdr msg = {0};
+                        struct iovec iov = {0};
+                        iov.iov_base = &resp;
+                        iov.iov_len = sizeof(resp);
+                        msg.msg_name = &sll;
+                        msg.msg_namelen = sizeof(sll);
+                        msg.msg_iov = &iov;
+                        msg.msg_iovlen = 1;
 
-                    sendmsg(raw_info.sock, &msg, 0);
-                    debug_log("Sent ARP response");
+                        sendmsg(raw_info.sock, &msg, 0);
+                        debug_log("Sent ARP response");
+                    }
+                }
+            }
+            else if (payload[0] == ARP_RESPONSE)
+            {
+                // Learn the MAC <-> MIP mapping
+                debug_log("Received ARP response");
+                arp_cache_insert(&arp_cache, mip->src_addr, eth->src_addr, raw_info.if_index);
+            }
+
+            else if (sdu_type == MIP_SDU_TYPE_PING)
+            {
+                if (mip->dst_addr == mip_addr || mip->dst_addr == 0xFF)
+                {
+                    size_t sdu_len = MIP_GET_SDU_LEN(mip);
+                    send(app_fd, payload, sdu_len, 0);
                 }
             }
         }
@@ -344,7 +357,7 @@ int recv_arp_response(raw_socket_info_t raw_info, uint8_t expected_mip)
         // double check if its a arp request we are getting
         uint8_t *payload = buf + sizeof(struct ether_frame) + sizeof(struct mip_header_raw);
 
-        if (MIP_GET_SDU_TYPE(mip) == MIP_SDU_TYPE_ARP && payload[0] == ARP_RESPONSE)
+        if (MIP_GET_SDU_TYPE(mip) == MIP_SDU_TYPE_ARP && payload[0] == ARP_REQUEST)
         {
             if (mip->src_addr == expected_mip)
             {
@@ -359,8 +372,9 @@ int recv_arp_response(raw_socket_info_t raw_info, uint8_t expected_mip)
                     arp_cache_insert(&arp_cache, mip->src_addr, eth->src_addr, recv_addr.sll_ifindex);
             }
         }
+
+        // cant happen
     }
-    // cant happen
     return -1;
 }
 int send_arp_request(raw_socket_info_t raw_info, uint8_t my_mip, uint8_t target_mip)
