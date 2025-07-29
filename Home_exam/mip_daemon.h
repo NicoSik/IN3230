@@ -33,29 +33,3 @@
 
 #define ARP_REQUEST 0x00
 #define ARP_RESPONSE 0x01
-
-typedef struct
-{
-    uint8_t mip_addr;
-    uint8_t mac_addr[6];
-    int valid;
-} mip_arp_entry_t;
-
-typedef struct
-{
-    mip_arp_entry_t entries[MAX_MIP_ADDRS];
-} mip_arp_cache_t;
-
-typedef struct
-{
-    int sock;
-    int if_index;
-    uint8_t mac[6];
-} raw_socket_info_t;
-
-struct ether_frame
-{
-    uint8_t dst_addr[6];
-    uint8_t src_addr[6];
-    uint16_t eth_proto;
-} __attribute__((packed));
