@@ -1,5 +1,7 @@
 {
     "files.associations": {
-        "mip_arp.h": "c"
+        "mip_arp.h": "c",
+        "stdio.h": "c",
+        "packet.h": "c"
     }
 }

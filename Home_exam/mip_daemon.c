@@ -10,13 +10,12 @@
 #include "common.h"
 #include <poll.h>
 #include <net/if.h>
-#include <linux/if.h>
 #include <sys/ioctl.h> // for ioctl
 #include <arpa/inet.h> // for htons
-#include <linux/if_packet.h>
+// #include <linux/if_packet.h>
 #include <ifaddrs.h> // for getifaddrs
-#include "mip_arp.h"
-#include "queue.h"
+#include "mip_arp.c"
+#include "queue.c"
 
 #define BUF_SIZE 2048
 #define ARP_REQUEST 0x00
@@ -42,18 +41,7 @@ int process_queued_messages(Queue *msg_queue, int mip_addr, raw_socket_info_t ra
 
 mip_arp_cache_t arp_cache;
 int debug_mode = 0; // Global debug flag
-void arp_cache_insert(mip_arp_cache_t *cache, uint8_t mip, uint8_t *mac, int if_index)
-{
-    cache->entries[mip].mip_addr = mip;
-    memcpy(cache->entries[mip].mac_addr, mac, 6);
-    cache->entries[mip].valid = 1;
-}
-mip_arp_entry_t *arp_cache_lookup(mip_arp_cache_t *cache, uint8_t mip)
-{
-    if (cache->entries[mip].valid)
-        return &cache->entries[mip];
-    return NULL;
-}
+
 void print_usage(const char *progname)
 {
     fprintf(stderr, "Usage: %s [-d] <socket_upper> <mip_addr> [interface]\n", progname);
@@ -132,8 +120,7 @@ char *get_first_interface()
             strcmp(ifp->ifa_name, "lo") != 0)
         {
 
-            strncpy(interface_name, ifp->ifa_name, IFNAMSIZ - 1);
-            interface_name[IFNAMSIZ - 1] = '\0';
+            snprintf(interface_name, IFNAMSIZ, "%s", ifp->ifa_name);
 
             if (debug_mode)
             {
@@ -223,7 +210,8 @@ void handle_ping_packet(struct mip_header_raw *mip, uint8_t *payload, int app_fd
 int parse_incoming_packet(uint8_t *buffer, ssize_t n, struct ether_frame **eth,
                           struct mip_header_raw **mip, uint8_t **payload)
 {
-    if (n < sizeof(struct ether_frame) + sizeof(struct mip_header_raw))
+    size_t min_size = sizeof(struct ether_frame) + sizeof(struct mip_header_raw);
+    if ((size_t)n < min_size)
     {
         fprintf(stderr, "Frame too short\n");
         return -1;
@@ -500,7 +488,8 @@ int recv_arp_response(raw_socket_info_t raw_info, uint8_t expected_mip)
             perror("recvfrom (ARP response)");
             return -1;
         }
-        if (n < sizeof(struct ether_frame) + sizeof(struct mip_header_raw))
+        size_t min_size = sizeof(struct ether_frame) + sizeof(struct mip_header_raw);
+        if ((size_t)n < min_size)
         {
             fprintf(stderr, "Frame too short\n");
             continue;
