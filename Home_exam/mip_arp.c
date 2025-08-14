@@ -1,20 +1,18 @@
+#include "common.h"
 #include "mip_arp.h"
 #include <sys/socket.h>
-// #include <linux/if_packet.h>
 #include <net/ethernet.h>
+#include <netpacket/packet.h>
+#include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <arpa/inet.h>
-
-#define ARP_REQUEST 0x00
-#define ARP_RESPONSE 0x01
-#define ETH_PROTOCOL 0x88B5
 
 extern mip_arp_cache_t arp_cache;
 
 void arp_cache_insert(mip_arp_cache_t *cache, uint8_t mip, uint8_t *mac, int if_index)
 {
+    (void)if_index; // Suppress unused parameter warning
     cache->entries[mip].mip_addr = mip;
     memcpy(cache->entries[mip].mac_addr, mac, 6);
     cache->entries[mip].valid = 1;
@@ -136,6 +134,7 @@ void handle_arp_packet(struct ether_frame *eth, struct mip_header_raw *mip, uint
             msg.msg_namelen = sizeof(sll);
             msg.msg_iov = &iov;
             msg.msg_iovlen = 1;
+            arp_cache_insert(&arp_cache, mip->src_addr, eth->src_addr, raw_info.if_index);
 
             sendmsg(raw_info.sock, &msg, 0);
             printf("[DEBUG] Sent ARP response\n");

@@ -2,6 +2,10 @@
     "files.associations": {
         "mip_arp.h": "c",
         "stdio.h": "c",
-        "packet.h": "c"
+        "packet.h": "c",
+        "mip_daemon.h": "c",
+        "common.h": "c",
+        "ifaddrs.h": "c",
+        "ioctl.h": "c"
     }
 }

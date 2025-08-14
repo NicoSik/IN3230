@@ -1,9 +1,13 @@
+#include "common.h"
+#include "mip_daemon.h"
+#include "mip_arp.h"
+#include "queue.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <string.h>
-#include "mip_daemon.h"
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <errno.h>
@@ -14,13 +18,8 @@
 #include <arpa/inet.h> // for htons
 // #include <linux/if_packet.h>
 #include <ifaddrs.h> // for getifaddrs
-#include "mip_arp.c"
-#include "queue.c"
 
 #define BUF_SIZE 2048
-#define ARP_REQUEST 0x00
-#define ARP_RESPONSE 0x01
-#define ETH_PROTOCOL 0x88B5
 
 // Message structure for queuing
 typedef struct
@@ -202,8 +201,14 @@ void handle_ping_packet(struct mip_header_raw *mip, uint8_t *payload, int app_fd
 {
     if (mip->dst_addr == mip_addr || mip->dst_addr == 0xFF)
     {
-        size_t sdu_len = MIP_GET_SDU_LEN(mip) * 4; // Convert words to bytes
-        send(app_fd, payload, sdu_len, 0);
+        size_t sdu_bytes = MIP_GET_SDU_LEN(mip) * 4;
+        uint8_t *out = malloc(1 + sdu_bytes);
+        if (!out)
+            return;
+        out[0] = mip->src_addr;
+        memcpy(out + 1, payload, sdu_bytes);
+        send(app_fd, out, 1 + sdu_bytes, 0);
+        free(out);
     }
 }
 
@@ -315,7 +320,7 @@ void run_daemon(int app_fd, int mip_addr, raw_socket_info_t raw_info)
 
         // Incoming from server
         if (fds[0].revents & POLLIN)
-
+        // SJEKKE ALLE IntERFACES
         {
             ssize_t n = recv(app_fd, buffer, sizeof(buffer), 0);
             if (n <= 0)
@@ -388,6 +393,13 @@ void run_daemon(int app_fd, int mip_addr, raw_socket_info_t raw_info)
 
             if (sdu_type == MIP_SDU_TYPE_ARP)
             {
+                size_t sdu_bytes = MIP_GET_SDU_LEN(mip) * 4;
+                size_t need = sizeof(struct ether_frame) + sizeof(struct mip_header_raw) + sdu_bytes;
+                if ((size_t)n < need)
+                {
+                    continue;
+                }
+
                 handle_arp_packet(eth, mip, payload, raw_info, mip_addr);
 
                 // After handling ANY ARP packet (request or response), process queued messages
