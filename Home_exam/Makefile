@@ -3,8 +3,8 @@ CFLAGS=-Wall -Wextra -g
 
 all: mip_daemon ping_server ping_client
 
-mip_daemon: mip_daemon.c
-	$(CC) $(CFLAGS) -o mip_daemon mip_daemon.c
+mip_daemon: mip_daemon.c mip_arp.c queue.c
+	$(CC) $(CFLAGS) -o $@ mip_daemon.c mip_arp.c queue.c
 
 ping_server: ping_server.c
 	$(CC) $(CFLAGS) -o ping_server ping_server.c

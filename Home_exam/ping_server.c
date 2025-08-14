@@ -61,34 +61,35 @@ int main(int argc, char *argv[])
             break;
         }
 
-        // Basic protocol format:
-        // First byte: destination MIP
-        // Second byte: SDU type (should be 0x02 for Ping)
-        // Remaining: payload
+        // Protocol format per spec:
+        // First byte: source/destination MIP address
+        // Remaining bytes: payload (SDU)
 
-        uint8_t dst = buf[0];
-        uint8_t sdu_type = buf[1];
-        uint8_t *payload = &buf[2];
-        int payload_len = bytes - 2;
+        uint8_t src_mip = buf[0];        // Source MIP address
+        char *payload = (char *)&buf[1]; // Payload starts at byte 1
+        int payload_len = bytes - 1;
 
-        if (sdu_type == MIP_SDU_TYPE_PING)
+        printf("Received from MIP %d: %.*s\n", src_mip, payload_len, payload);
+
+        // Check if it's a PING message
+        if (payload_len >= 5 && strncmp(payload, "PING:", 5) == 0)
         {
-            printf("Got ping request for MIP %d, replying...\n", dst);
+            char *user_msg = payload + 5; // Extract user message after "PING:"
+            int user_msg_len = payload_len - 5;
 
-            // Echo back same data
+            printf("Got ping request from MIP %d, replying...\n", src_mip);
+
+            // Create PONG response
             uint8_t reply[BUF_SIZE];
-            reply[0] = dst;               // destination = original sender
-            reply[1] = MIP_SDU_TYPE_PING; // Ping type
-            memcpy(&reply[2], payload, payload_len);
+            reply[0] = src_mip; // Send back to original sender
 
-            if (send(client_fd, reply, payload_len + 2, 0) < 0)
+            // Format: "PONG:<user_message>"
+            int reply_len = snprintf((char *)&reply[1], BUF_SIZE - 1, "PONG:%.*s", user_msg_len, user_msg);
+
+            if (send(client_fd, reply, reply_len + 1, 0) < 0)
             {
                 perror("send");
             }
-        }
-        else
-        {
-            fprintf(stderr, "Unknown SDU type: %d\n", sdu_type);
         }
     }
 

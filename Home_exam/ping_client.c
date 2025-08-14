@@ -3,7 +3,10 @@
  * ping_client - Send a ping message to a MIP daemon and wait for a response.
  *
  * Usage:
- *   ping_client [-h] <socket_path> <destination_mip_address> <message>
+ *   ping_client [-h] <socke    recv_buf[n] = '\0';
+    const char *reply = (const char *)&recv_buf[1]; // Skip MIP address byte
+
+    if (strncmp(reply, "PONG:", 5) == 0 && strcmp(reply + 5, user_msg) == 0)th> <destination_mip_address> <message>
  *
  * The client connects to the MIP daemon via a UNIX domain socket,
  * sends a "PING:<message>" to the specified MIP address, and waits
@@ -12,7 +15,7 @@
  * If a correct reply is received, it prints the round-trip time.
  * If no reply is received within 1 second, it prints "timeout".
  */
-
+#include "common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,7 +125,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    recv_buf[n] = '\\0';
+    recv_buf[n] = '\0';
     const char *reply = (const char *)&recv_buf[0];
 
     if (strncmp((char *)reply, "PONG:", 5) == 0 && strcmp(reply + 5, user_msg) == 0)
